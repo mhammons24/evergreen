@@ -1,0 +1,1083 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Evergreen Rebase / Repave — Target State & Implementation Roadmap</title>
+  <style>
+    :root{
+      --bg:#0b1020;
+      --panel:#121a2f;
+      --panel-2:#17223d;
+      --text:#eef3ff;
+      --muted:#9fb0d0;
+      --line:#2d3a5d;
+      --accent:#7aa2ff;
+      --accent-2:#7ee7c6;
+      --warn:#ffd166;
+      --danger:#ff8a8a;
+      --shadow:0 14px 38px rgba(0,0,0,.24);
+      --radius:18px;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{
+      margin:0;
+      font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(122,162,255,.12), transparent 34%),
+        linear-gradient(180deg, #09101f 0%, var(--bg) 100%);
+      line-height:1.55;
+    }
+    a{color:inherit}
+    code{
+      font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      background:rgba(255,255,255,.06);
+      padding:1px 6px;
+      border-radius:8px;
+      font-size:.93em;
+    }
+    .shell{max-width:1180px;margin:0 auto;padding:0 28px}
+    header{
+      position:sticky;top:0;z-index:20;
+      backdrop-filter: blur(14px);
+      background:rgba(9,16,31,.78);
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    nav{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:15px 0}
+    .brand{font-weight:800;letter-spacing:.02em}
+    .navlinks{display:flex;gap:18px;flex-wrap:wrap}
+    .navlinks a{font-size:14px;color:var(--muted);text-decoration:none}
+    .navlinks a:hover{color:var(--text)}
+    .hero{padding:92px 0 56px}
+    .eyebrow{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:7px 11px;border:1px solid rgba(122,162,255,.35);
+      background:rgba(122,162,255,.08);border-radius:999px;
+      color:#c9d7ff;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em
+    }
+    h1{font-size:clamp(42px,7vw,78px);line-height:1.02;margin:22px 0 20px;letter-spacing:-.04em}
+    h2{font-size:clamp(30px,4vw,46px);line-height:1.1;margin:0 0 16px;letter-spacing:-.025em}
+    h3{font-size:21px;margin:0 0 10px}
+    p{margin:0 0 14px}
+    .lede{max-width:900px;font-size:21px;color:#c8d4ee}
+    .hero-grid{display:grid;grid-template-columns:1.35fr .65fr;gap:24px;margin-top:38px}
+    .metric-card,.card,.diagram,.callout,.arch-svg-wrap{
+      border:1px solid rgba(255,255,255,.08);
+      background:linear-gradient(180deg, rgba(23,34,61,.92), rgba(16,25,46,.92));
+      border-radius:var(--radius);box-shadow:var(--shadow)
+    }
+    .metric-card{padding:26px}
+    .metric-card strong{display:block;font-size:15px;color:var(--accent-2);margin-bottom:8px}
+    .metric-card span{font-size:28px;font-weight:800;letter-spacing:-.03em}
+    section{padding:62px 0}
+    .section-head{max-width:820px;margin-bottom:28px}
+    .section-head p{color:var(--muted);font-size:18px}
+    .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+    .grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+    .card{padding:24px}
+    .card p,.card li{color:var(--muted)}
+    .card ul{margin:10px 0 0;padding-left:20px}
+    .pill{
+      display:inline-block;padding:5px 9px;border-radius:999px;
+      font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+      border:1px solid rgba(255,255,255,.1);color:#dfe8ff;background:rgba(255,255,255,.04)
+    }
+    .diagram{padding:26px;overflow:auto}
+    .flow{
+      display:flex;align-items:stretch;gap:12px;min-width:960px
+    }
+    .flow-col{flex:1;display:flex;flex-direction:column;gap:12px}
+    .node{
+      border:1px solid var(--line);background:rgba(255,255,255,.035);
+      border-radius:14px;padding:17px 16px;min-height:78px
+    }
+    .node b{display:block;margin-bottom:5px}
+    .node small{color:var(--muted)}
+    .arrow{
+      display:flex;align-items:center;justify-content:center;
+      color:var(--accent);font-size:26px;min-width:24px
+    }
+    .state-track{
+      display:flex;gap:10px;align-items:center;flex-wrap:wrap
+    }
+    .state{
+      padding:12px 15px;border-radius:12px;border:1px solid var(--line);
+      background:rgba(255,255,255,.035);font-weight:800;font-size:14px
+    }
+    .state.eval{border-color:rgba(126,231,198,.45);box-shadow:inset 0 0 0 1px rgba(126,231,198,.08)}
+    .state.blocked{border-color:rgba(255,138,138,.45);color:#ffd0d0}
+    .state-arrow{color:var(--muted);font-size:22px}
+    .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;color:var(--muted);font-size:13px}
+    .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px;background:var(--accent-2)}
+    .journey{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+    .step{padding:20px;border-radius:16px;background:rgba(255,255,255,.035);border:1px solid var(--line)}
+    .step-num{font-size:12px;color:var(--accent);font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+    .step p{color:var(--muted);font-size:14px}
+    .split{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    .gate{
+      padding:22px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.03)
+    }
+    .gate h3{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .gate .tag{font-size:11px;color:var(--muted);border:1px solid var(--line);padding:4px 7px;border-radius:999px}
+    .controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+    .control{padding:18px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.03)}
+    .control strong{display:block;font-size:14px;margin-bottom:4px}
+    .control span{color:var(--muted);font-size:13px}
+    .capacity{
+      margin-top:18px;padding:20px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.03)
+    }
+    .bar{height:22px;border-radius:999px;background:#22304e;overflow:hidden;display:flex;margin:12px 0 8px}
+    .bar .auto{width:90%;background:linear-gradient(90deg, #658bff, #7aa2ff)}
+    .bar .manual{width:10%;background:linear-gradient(90deg, #55d9b3, #7ee7c6)}
+    .note{
+      padding:18px 20px;border-left:4px solid var(--accent);
+      background:rgba(122,162,255,.07);border-radius:0 14px 14px 0;color:#d9e4ff
+    }
+    .openq{
+      border-left-color:var(--warn);background:rgba(255,209,102,.08)
+    }
+    .summary{
+      padding:30px;border-radius:20px;background:linear-gradient(135deg, rgba(122,162,255,.12), rgba(126,231,198,.08));
+      border:1px solid rgba(255,255,255,.09)
+    }
+    .arch-svg-wrap{padding:22px;overflow:auto}
+    svg text{font-family:Inter, ui-sans-serif, system-ui, sans-serif}
+    .arch-caption{color:var(--muted);font-size:14px;margin-top:12px}
+    footer{padding:34px 0 50px;color:var(--muted);font-size:13px}
+    @media (max-width:900px){
+      .hero-grid,.grid-2,.grid-3,.split,.controls,.journey{grid-template-columns:1fr}
+      .navlinks{display:none}
+      .hero{padding-top:64px}
+      .shell{padding:0 18px}
+    }
+
+    .implementation-divider{
+      max-width:1180px;margin:30px auto 0;padding:30px 28px 0;
+      border-top:1px solid rgba(255,255,255,.08);
+      color:#dfe7fb;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:.12em;
+    }
+    .roadmap{padding:28px}
+    .migration{
+      display:grid;grid-template-columns:1fr 56px 1fr 56px 1fr 56px 1fr;
+      align-items:stretch;gap:10px
+    }
+    .stage{padding:22px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.035)}
+    .stage .num{font-size:12px;font-weight:900;color:var(--accent);letter-spacing:.08em;text-transform:uppercase}
+    .stage b{display:block;font-size:19px;margin:8px 0}
+    .stage span{color:var(--muted);font-size:14px}
+    .principle{
+      margin-top:18px;padding:22px 24px;border-radius:16px;
+      background:linear-gradient(135deg,rgba(122,162,255,.12),rgba(126,231,198,.07));
+      border:1px solid rgba(255,255,255,.08);font-size:19px;font-weight:700
+    }
+    .slice{padding:30px;margin-top:24px}
+    .slice-title{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap}
+    .slice-title p{max-width:800px;color:var(--muted)}
+    .badge{
+      display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid var(--line);
+      color:#dce6ff;background:rgba(255,255,255,.04);font-size:12px;font-weight:800;
+      text-transform:uppercase;letter-spacing:.06em
+    }
+    .cwr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:24px}
+    .phase{min-width:0;border:1px solid var(--line);border-radius:16px;padding:22px;background:rgba(255,255,255,.03)}
+    .phase.crawl{border-top:3px solid var(--accent2)}
+    .phase.walk{border-top:3px solid var(--accent)}
+    .phase.run{border-top:3px solid var(--warn)}
+    .phase-label{font-size:12px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+    .phase h3{margin-top:8px}
+    .phase p,.phase li{color:var(--muted);font-size:14px}
+    .phase ul{padding-left:19px;margin:12px 0 0}
+    .outcome{
+      margin-top:16px;padding:14px;border-radius:12px;background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.06)
+    }
+    .outcome strong{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent2);margin-bottom:4px}
+    .compat{
+      margin-top:18px;padding:16px 18px;border-radius:14px;
+      border:1px solid rgba(126,231,198,.24);background:rgba(126,231,198,.055)
+    }
+    .compat b{color:var(--accent2)}
+    .road-flow{margin-top:24px;padding:22px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.025);overflow:auto}
+    .flowline{display:flex;align-items:center;gap:10px;min-width:850px}
+    .flowline .node{flex:1}
+    .table-wrap{overflow:auto;border-radius:16px;border:1px solid rgba(255,255,255,.08)}
+    table{width:100%;border-collapse:collapse;min-width:900px;background:rgba(255,255,255,.025)}
+    th,td{padding:16px 18px;text-align:left;border-bottom:1px solid rgba(255,255,255,.07);vertical-align:top}
+    th{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:#cdd8f5;background:rgba(255,255,255,.035)}
+    td{color:var(--muted)}
+    td strong{color:var(--text)}
+    @media(max-width:900px){
+      .migration{grid-template-columns:1fr}
+      .migration .arrow{transform:rotate(90deg)}
+      .cwr{grid-template-columns:1fr}
+    }
+
+  </style>
+</head>
+<body>
+<header>
+  <div class="shell">
+    <nav>
+      <div class="brand">Evergreen Target State & Roadmap</div>
+      <div class="navlinks">
+        <a href="#architecture">Architecture</a>
+        <a href="#arch-diagram">Arch Diagram</a>
+        <a href="#journey">User Journey</a>
+        <a href="#states">States</a>
+        <a href="#waves">Waves & Scheduling</a>
+        <a href="#governance">Deferral & Exceptions</a>
+        <a href="#production">Production</a>
+        <a href="#migration">Implementation</a>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="shell">
+      <div class="eyebrow">Target state + implementation roadmap</div>
+      <h1>Evergreen Rebase / Repave</h1>
+      <p class="lede">
+        A target-state platform for continuously identifying base-image drift across application environments,
+        controlling when remediation may begin, and safely orchestrating rebase and repave workflows at firm scale — while evolving the live platform incrementally without disrupting existing customers.
+      </p>
+
+      <div class="hero-grid">
+        <div class="metric-card">
+          <strong>Core design principle</strong>
+          <span>Separate identifying work from executing work.</span>
+        </div>
+        <div class="metric-card">
+          <strong>Operating model</strong>
+          <span>State → Eligibility → Admission → Execution</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <div class="shell">
+      <div class="section-head">
+        <h2>Target architecture</h2>
+        <p>
+          The platform can immediately understand the full remediation backlog without creating a firm-wide execution spike.
+        </p>
+      </div>
+
+      <div class="diagram">
+        <div class="flow">
+          <div class="flow-col">
+            <div class="node"><b>Application Repository</b><small><code>evergreen.yml</code> initiates onboarding</small></div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-col">
+            <div class="node"><b>State Management</b><small>Desired base, observed base, application image, lifecycle state</small></div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-col">
+            <div class="node"><b>Execution Eligibility</b><small>Automated wave eligibility or manual user trigger</small></div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-col">
+            <div class="node"><b>Scheduling Service</b><small>Concurrency, start rate, pause control, manual capacity reserve</small></div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="flow-col">
+            <div class="node"><b>Temporal</b><small>Long-running rebase, repave, validation and production workflow</small></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-3" style="margin-top:20px">
+        <div class="card">
+          <span class="pill">State</span>
+          <h3 style="margin-top:12px">Whether work is needed</h3>
+          <p>Maintains environment truth and determines whether the environment is current or requires remediation.</p>
+        </div>
+        <div class="card">
+          <span class="pill">Scheduling</span>
+          <h3 style="margin-top:12px">When work may start</h3>
+          <p>Applies rollout timing, manual authorization and runtime capacity controls before admitting work.</p>
+        </div>
+        <div class="card">
+          <span class="pill">Temporal</span>
+          <h3 style="margin-top:12px">How work is completed</h3>
+          <p>Owns the long-running execution path, retries, waits and workflow orchestration.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="arch-diagram">
+    <div class="shell">
+      <div class="section-head">
+        <h2>Architecture diagram</h2>
+        <p>
+          A high-level system view showing how onboarding and environment events establish state,
+          how user and firm policy determine eligibility, and how scheduling protects execution capacity.
+        </p>
+      </div>
+
+      <div class="arch-svg-wrap">
+        <svg viewBox="0 0 1140 760" width="100%" role="img" aria-label="Evergreen target state architecture diagram">
+          <defs>
+            <linearGradient id="boxGrad" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="#1b2750"/>
+              <stop offset="100%" stop-color="#141e3d"/>
+            </linearGradient>
+            <linearGradient id="boxGrad2" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="#183149"/>
+              <stop offset="100%" stop-color="#13293c"/>
+            </linearGradient>
+            <marker id="arrowhead" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto">
+              <polygon points="0 0, 12 4, 0 8" fill="#7aa2ff"></polygon>
+            </marker>
+            <marker id="arrowheadGreen" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto">
+              <polygon points="0 0, 12 4, 0 8" fill="#7ee7c6"></polygon>
+            </marker>
+          </defs>
+
+          <rect x="35" y="35" rx="18" ry="18" width="245" height="86" fill="url(#boxGrad)" stroke="#40527f"/>
+          <text x="158" y="68" fill="#eef3ff" font-size="21" font-weight="700" text-anchor="middle">Application Repository</text>
+          <text x="158" y="96" fill="#9fb0d0" font-size="14" text-anchor="middle">Commit evergreen.yml</text>
+
+          <rect x="310" y="35" rx="18" ry="18" width="230" height="86" fill="url(#boxGrad)" stroke="#40527f"/>
+          <text x="425" y="68" fill="#eef3ff" font-size="21" font-weight="700" text-anchor="middle">Base Image Events</text>
+          <text x="425" y="96" fill="#9fb0d0" font-size="14" text-anchor="middle">New desired base</text>
+
+          <rect x="570" y="35" rx="18" ry="18" width="230" height="86" fill="url(#boxGrad)" stroke="#40527f"/>
+          <text x="685" y="68" fill="#eef3ff" font-size="21" font-weight="700" text-anchor="middle">Deployment Events</text>
+          <text x="685" y="96" fill="#9fb0d0" font-size="14" text-anchor="middle">Observed app / base</text>
+
+          <rect x="830" y="35" rx="18" ry="18" width="275" height="86" fill="url(#boxGrad)" stroke="#40527f"/>
+          <text x="968" y="68" fill="#eef3ff" font-size="21" font-weight="700" text-anchor="middle">User Actions & Firm Policy</text>
+          <text x="968" y="96" fill="#9fb0d0" font-size="14" text-anchor="middle">Manual trigger • defer • limits</text>
+
+          <rect x="55" y="205" rx="24" ry="24" width="310" height="170" fill="url(#boxGrad2)" stroke="#4a6298" stroke-width="1.5"/>
+          <text x="210" y="242" fill="#eef3ff" font-size="27" font-weight="800" text-anchor="middle">State Management</text>
+          <text x="210" y="270" fill="#9fb0d0" font-size="14" text-anchor="middle">Authoritative environment lifecycle</text>
+          <rect x="85" y="300" rx="12" ry="12" width="250" height="48" fill="#1a2240" stroke="#3d4e7a"/>
+          <text x="210" y="321" fill="#eef3ff" font-size="15" font-weight="700" text-anchor="middle">Discovery • Evaluation • State</text>
+          <text x="210" y="340" fill="#9fb0d0" font-size="11" text-anchor="middle">Observed vs desired + workflow progress</text>
+
+          <rect x="415" y="205" rx="24" ry="24" width="310" height="170" fill="url(#boxGrad2)" stroke="#4a6298" stroke-width="1.5"/>
+          <text x="570" y="242" fill="#eef3ff" font-size="27" font-weight="800" text-anchor="middle">Eligibility & Governance</text>
+          <text x="570" y="270" fill="#9fb0d0" font-size="14" text-anchor="middle">Determines when pending work may run</text>
+          <rect x="445" y="300" rx="12" ry="12" width="250" height="48" fill="#1a2240" stroke="#3d4e7a"/>
+          <text x="570" y="321" fill="#eef3ff" font-size="15" font-weight="700" text-anchor="middle">Waves • Manual • Deferral</text>
+          <text x="570" y="340" fill="#9fb0d0" font-size="11" text-anchor="middle">Firm policy drives EXCEPTION</text>
+
+          <rect x="775" y="205" rx="24" ry="24" width="310" height="170" fill="url(#boxGrad2)" stroke="#4a6298" stroke-width="1.5"/>
+          <text x="930" y="242" fill="#eef3ff" font-size="27" font-weight="800" text-anchor="middle">Scheduling Service</text>
+          <text x="930" y="270" fill="#9fb0d0" font-size="14" text-anchor="middle">Protects shared platform capacity</text>
+          <rect x="805" y="300" rx="12" ry="12" width="250" height="48" fill="#1a2240" stroke="#3d4e7a"/>
+          <text x="930" y="321" fill="#eef3ff" font-size="15" font-weight="700" text-anchor="middle">Concurrency • Rate • Reserve</text>
+          <text x="930" y="340" fill="#9fb0d0" font-size="11" text-anchor="middle">Runtime-adjustable admission controls</text>
+
+          <rect x="360" y="460" rx="24" ry="24" width="420" height="145" fill="url(#boxGrad2)" stroke="#4a6298" stroke-width="1.5"/>
+          <text x="570" y="498" fill="#eef3ff" font-size="28" font-weight="800" text-anchor="middle">Temporal Workflows</text>
+          <text x="570" y="526" fill="#9fb0d0" font-size="14" text-anchor="middle">Long-running non-prod and production execution</text>
+          <rect x="395" y="550" rx="12" ry="12" width="105" height="34" fill="#1a2240" stroke="#3d4e7a"/>
+          <text x="448" y="572" fill="#eef3ff" font-size="14" font-weight="700" text-anchor="middle">Rebase</text>
+          <rect x="518" y="550" rx="12" ry="12" width="105" height="34" fill="#1a2240" stroke="#3d4e7a"/>
+          <text x="570" y="572" fill="#eef3ff" font-size="14" font-weight="700" text-anchor="middle">Repave</text>
+          <rect x="640" y="550" rx="12" ry="12" width="105" height="34" fill="#1a2240" stroke="#3d4e7a"/>
+          <text x="693" y="572" fill="#eef3ff" font-size="14" font-weight="700" text-anchor="middle">Validate</text>
+
+          <text x="570" y="655" fill="#9fb0d0" font-size="13" font-weight="700" text-anchor="middle">DURABLE ENVIRONMENT OUTCOMES</text>
+          <rect x="45" y="680" rx="16" ry="16" width="190" height="52" fill="#183a35" stroke="#3d7f72"/>
+          <text x="140" y="712" fill="#eef3ff" font-size="18" font-weight="800" text-anchor="middle">UP_TO_DATE</text>
+          <rect x="260" y="680" rx="16" ry="16" width="190" height="52" fill="#2d321e" stroke="#6f7842"/>
+          <text x="355" y="712" fill="#eef3ff" font-size="17" font-weight="800" text-anchor="middle">PENDING_EXECUTION</text>
+          <rect x="475" y="680" rx="16" ry="16" width="190" height="52" fill="#26324b" stroke="#60759c"/>
+          <text x="570" y="712" fill="#eef3ff" font-size="18" font-weight="800" text-anchor="middle">DEFERRED</text>
+          <rect x="690" y="680" rx="16" ry="16" width="190" height="52" fill="#40311a" stroke="#8d7243"/>
+          <text x="785" y="712" fill="#eef3ff" font-size="18" font-weight="800" text-anchor="middle">EXCEPTION</text>
+          <rect x="905" y="680" rx="16" ry="16" width="190" height="52" fill="#3b2028" stroke="#8f5563"/>
+          <text x="1000" y="712" fill="#eef3ff" font-size="18" font-weight="800" text-anchor="middle">BLOCKED</text>
+
+          <line x1="158" y1="121" x2="185" y2="205" stroke="#7aa2ff" stroke-width="3" marker-end="url(#arrowhead)"/>
+          <line x1="425" y1="121" x2="275" y2="205" stroke="#7aa2ff" stroke-width="3" marker-end="url(#arrowhead)"/>
+          <line x1="685" y1="121" x2="335" y2="205" stroke="#7aa2ff" stroke-width="3" marker-end="url(#arrowhead)"/>
+          <line x1="968" y1="121" x2="650" y2="205" stroke="#7ee7c6" stroke-width="3" marker-end="url(#arrowheadGreen)"/>
+          <line x1="365" y1="290" x2="415" y2="290" stroke="#7aa2ff" stroke-width="3" marker-end="url(#arrowhead)"/>
+          <line x1="725" y1="290" x2="775" y2="290" stroke="#7aa2ff" stroke-width="3" marker-end="url(#arrowhead)"/>
+          <path d="M930 375 C930 425, 760 438, 725 460" fill="none" stroke="#7aa2ff" stroke-width="3" marker-end="url(#arrowhead)"/>
+          <path d="M415 460 C350 430, 250 420, 225 375" fill="none" stroke="#7ee7c6" stroke-width="2.5" marker-end="url(#arrowheadGreen)"/>
+          <line x1="210" y1="375" x2="210" y2="645" stroke="#40527f" stroke-width="2" stroke-dasharray="6 7"/>
+          <line x1="210" y1="645" x2="1000" y2="645" stroke="#40527f" stroke-width="2" stroke-dasharray="6 7"/>
+        </svg>
+        <div class="arch-caption">
+          State management determines whether action is required. Eligibility and governance apply wave timing,
+          manual authorization and user deferral policy. Scheduling controls how much eligible work may enter Temporal.
+          Durable states make normal waiting, intentional deferral, policy exception and technical blockage visibly distinct.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="journey">
+    <div class="shell">
+      <div class="section-head">
+        <h2>Application team user journey</h2>
+        <p>
+          Users onboard through configuration; after that, the platform continuously maintains base-image currency for each environment.
+        </p>
+      </div>
+
+      <div class="journey">
+        <div class="step"><div class="step-num">01 · Onboard</div><h3>Commit <code>evergreen.yml</code></h3><p>Application team declares the component and environments.</p></div>
+        <div class="step"><div class="step-num">02 · Discover</div><h3>Establish environment truth</h3><p>Platform discovers deployed application images, observed base images and execution policy.</p></div>
+        <div class="step"><div class="step-num">03 · Evaluate</div><h3>Determine need</h3><p>Observed state is compared with the current desired base image.</p></div>
+        <div class="step"><div class="step-num">04 · Queue</div><h3>Enter pending execution</h3><p>If remediation is needed, the environment becomes a durable backlog item.</p></div>
+        <div class="step"><div class="step-num">05 · Control</div><h3>Determine eligibility</h3><p>Automated environments wait for their wave and may be deferred within policy; manual environments wait for user input.</p></div>
+        <div class="step"><div class="step-num">06 · Admit</div><h3>Apply load controls</h3><p>The scheduler admits work only when runtime capacity allows.</p></div>
+        <div class="step"><div class="step-num">07 · Execute</div><h3>Run Temporal workflow</h3><p>Rebase, repave and validation are orchestrated to completion.</p></div>
+        <div class="step"><div class="step-num">08 · Complete</div><h3>Reach a durable outcome</h3><p>The environment returns to up-to-date, or is surfaced as exception or blocked when governance or intervention is required.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="states">
+    <div class="shell">
+      <div class="section-head">
+        <h2>Environment state model</h2>
+        <p>The model separates durable lifecycle state from the details of active execution.</p>
+      </div>
+
+      <div class="card">
+        <h3>Common lifecycle states</h3>
+        <div class="state-track" style="margin-top:16px">
+          <div class="state">DISCOVERY</div>
+          <div class="state-arrow">→</div>
+          <div class="state eval">UP_TO_DATE</div>
+          <div class="state-arrow">↔</div>
+          <div class="state eval">PENDING_EXECUTION</div>
+          <div class="state-arrow">↔</div>
+          <div class="state eval">DEFERRED</div>
+          <div class="state-arrow">→</div>
+          <div class="state eval">EXCEPTION</div>
+          <div class="state-arrow">·</div>
+          <div class="state blocked">BLOCKED</div>
+        </div>
+        <div class="legend">
+          <span><i class="dot"></i>Evaluatable state</span>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:20px">
+        <div class="card">
+          <span class="pill">Non-production</span>
+          <div class="state-track" style="margin-top:16px">
+            <div class="state eval">PENDING_EXECUTION</div>
+            <div class="state-arrow">→</div>
+            <div class="state">REBASING</div>
+            <div class="state-arrow">→</div>
+            <div class="state">REPAVING</div>
+            <div class="state-arrow">→</div>
+            <div class="state">VALIDATING</div>
+            <div class="state-arrow">→</div>
+            <div class="state eval">UP_TO_DATE</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="pill">Production</span>
+          <div class="state-track" style="margin-top:16px">
+            <div class="state eval">PENDING_EXECUTION</div>
+            <div class="state-arrow">→</div>
+            <div class="state">REBASING</div>
+            <div class="state-arrow">→</div>
+            <div class="state">DEPLOYING_VALIDATION_ENVIRONMENT</div>
+            <div class="state-arrow">→</div>
+            <div class="state">EXECUTING_TESTS</div>
+            <div class="state-arrow">→</div>
+            <div class="state">CREATING_CHANGE</div>
+            <div class="state-arrow">→</div>
+            <div class="state eval">PENDING_REPAVE_WINDOW</div>
+            <div class="state-arrow">→</div>
+            <div class="state">REPAVING</div>
+            <div class="state-arrow">→</div>
+            <div class="state">VALIDATING</div>
+            <div class="state-arrow">→</div>
+            <div class="state eval">UP_TO_DATE</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note" style="margin-top:20px">
+        <b>Evaluatable states:</b> <code>UP_TO_DATE</code>, <code>PENDING_EXECUTION</code>,
+        <code>DEFERRED</code>, <code>EXCEPTION</code> and <code>PENDING_REPAVE_WINDOW</code>.
+        New desired or observed state causes reevaluation so environments can return to <code>UP_TO_DATE</code>
+        when the underlying remediation need disappears.
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="shell">
+      <div class="section-head">
+        <h2>Environment independence</h2>
+        <p>
+          The desired base image is common, but application images can differ between environments.
+          Each environment is therefore evaluated and remediated independently.
+        </p>
+      </div>
+
+      <div class="grid-3">
+        <div class="card"><span class="pill">DEV</span><h3 style="margin-top:12px">UP_TO_DATE</h3><p><b>App image:</b> app-dev-123<br><b>Observed base:</b> v15<br><b>Desired base:</b> v15</p></div>
+        <div class="card"><span class="pill">UAT</span><h3 style="margin-top:12px">PENDING_EXECUTION</h3><p><b>App image:</b> app-uat-456<br><b>Observed base:</b> v14<br><b>Desired base:</b> v15</p></div>
+        <div class="card"><span class="pill">PROD</span><h3 style="margin-top:12px">PENDING_EXECUTION</h3><p><b>App image:</b> app-prod-789<br><b>Observed base:</b> v14<br><b>Desired base:</b> v15</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="waves">
+    <div class="shell">
+      <div class="section-head">
+        <h2>Waves and scheduling</h2>
+        <p>
+          Wave timing controls rollout eligibility. The scheduling service independently controls actual execution volume.
+        </p>
+      </div>
+
+      <div class="split">
+        <div class="gate">
+          <h3>Automated environment <span class="tag">Wave-driven</span></h3>
+          <p><code>PENDING_EXECUTION</code> → wait for wave open time → optionally defer within policy → scheduler capacity → execute.</p>
+        </div>
+        <div class="gate">
+          <h3>Manual environment <span class="tag">User-driven</span></h3>
+          <p><code>PENDING_EXECUTION</code> → wait for user trigger → scheduler capacity → execute immediately when room exists.</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <h3>Example rollout waves</h3>
+        <div class="grid-3" style="margin-top:16px">
+          <div class="control"><strong>Wave 1</strong><span>Monday · 09:00</span></div>
+          <div class="control"><strong>Wave 2</strong><span>Monday · 13:00</span></div>
+          <div class="control"><strong>Wave 3</strong><span>Tuesday · 09:00</span></div>
+        </div>
+        <p style="color:var(--muted);margin-top:16px">A wave opening means work <b>may</b> start. It does not directly start all environments in that wave.</p>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <h3>Runtime scheduler controls</h3>
+        <div class="controls" style="margin-top:16px">
+          <div class="control"><strong>Total concurrency</strong><span>Maximum active executions</span></div>
+          <div class="control"><strong>Start-rate limit</strong><span>Controls ramp speed</span></div>
+          <div class="control"><strong>Automated pause</strong><span>Stops new automated admissions</span></div>
+          <div class="control"><strong>Manual reserve</strong><span>Protects room for user-triggered work</span></div>
+        </div>
+
+        <div class="capacity">
+          <b>Illustrative capacity split</b>
+          <div class="bar"><div class="auto"></div><div class="manual"></div></div>
+          <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:13px">
+            <span>Automated may consume up to 90%</span>
+            <span>10% reserved from automated use</span>
+          </div>
+          <p style="color:var(--muted);margin-top:12px">
+            Manual work may use any free capacity. The reserve only prevents automated workloads from consuming the final protected slots.
+          </p>
+        </div>
+      </div>
+
+      <div class="note" style="margin-top:20px">
+        Runtime controls can be increased or decreased without restarting services. Lowering limits does not cancel active workflows; it only reduces new admissions.
+      </div>
+    </div>
+  </section>
+
+  <section id="governance">
+    <div class="shell">
+      <div class="section-head">
+        <h2>Application control & exception governance</h2>
+        <p>
+          Automated remediation remains the default, while application teams retain bounded control to defer a repave
+          when timing conflicts with their workload or business activity.
+        </p>
+      </div>
+
+      <div class="grid-3">
+        <div class="card">
+          <span class="pill">Normal</span>
+          <h3 style="margin-top:12px">PENDING_EXECUTION</h3>
+          <p>Work is required and is waiting for its normal execution conditions: wave eligibility and scheduler capacity.</p>
+        </div>
+        <div class="card">
+          <span class="pill">User controlled</span>
+          <h3 style="margin-top:12px">DEFERRED</h3>
+          <p>The application team has intentionally postponed an automated repave within the firm's permitted deferral policy.</p>
+        </div>
+        <div class="card">
+          <span class="pill">Governance</span>
+          <h3 style="margin-top:12px">EXCEPTION</h3>
+          <p>The environment has exceeded the permitted deferral allowance or firm remediation standard and requires governance visibility.</p>
+        </div>
+      </div>
+
+      <div class="diagram" style="margin-top:20px">
+        <div class="state-track">
+          <div class="state eval">PENDING_EXECUTION</div>
+          <div class="state-arrow">→</div>
+          <div class="state eval">DEFERRED</div>
+          <div class="state-arrow">→</div>
+          <div class="state eval">EXCEPTION</div>
+        </div>
+        <div class="legend">
+          <span>user defers</span><span>•</span><span>deferral expires → PENDING_EXECUTION</span><span>•</span><span>policy exceeded → EXCEPTION</span>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:20px">
+        <div class="card">
+          <h3>Deferral principles</h3>
+          <ul>
+            <li>Deferral applies to automated repaves before scheduler admission.</li>
+            <li>Deferrals are time-bound and governed by a firm-defined allowance.</li>
+            <li>When the permitted defer period expires, the environment returns to <code>PENDING_EXECUTION</code>.</li>
+            <li>A newer desired base does not erase the unresolved remediation obligation.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Exception vs. blocked</h3>
+          <p><b>EXCEPTION</b> is a governance condition: remediation is overdue relative to firm policy.</p>
+          <p><b>BLOCKED</b> is an operational condition: automation cannot safely continue because technical or manual intervention is required.</p>
+        </div>
+      </div>
+
+      <div class="note" style="margin-top:20px">
+        <b>Continuous reevaluation:</b> <code>DEFERRED</code> and <code>EXCEPTION</code> remain evaluatable.
+        If a normal application deployment brings the environment onto the desired base image, the state can return directly to <code>UP_TO_DATE</code>.
+      </div>
+    </div>
+  </section>
+
+  <section id="production">
+    <div class="shell">
+      <div class="section-head">
+        <h2>Production workflow</h2>
+        <p>
+          Production remains independently tracked, but its execution path includes validation-environment and change-management safeguards.
+        </p>
+      </div>
+
+      <div class="diagram">
+        <div class="state-track">
+          <div class="state eval">PENDING_EXECUTION</div>
+          <div class="state-arrow">→</div>
+          <div class="state">REBASING</div>
+          <div class="state-arrow">→</div>
+          <div class="state">DEPLOYING_VALIDATION_ENVIRONMENT</div>
+          <div class="state-arrow">→</div>
+          <div class="state">EXECUTING_TESTS</div>
+          <div class="state-arrow">→</div>
+          <div class="state">CREATING_CHANGE</div>
+          <div class="state-arrow">→</div>
+          <div class="state eval">PENDING_REPAVE_WINDOW</div>
+          <div class="state-arrow">→</div>
+          <div class="state">REPAVING</div>
+          <div class="state-arrow">→</div>
+          <div class="state">VALIDATING</div>
+          <div class="state-arrow">→</div>
+          <div class="state eval">UP_TO_DATE</div>
+        </div>
+      </div>
+
+      <div class="note" style="margin-top:20px">
+        The validation environment is used as part of the production execution workflow. It is not a broader artifact-promotion model across all environments.
+      </div>
+
+      <div class="note openq" style="margin-top:14px">
+        <b>Open question:</b> How should production workflows sitting in <code>PENDING_REPAVE_WINDOW</code> count against scheduler concurrency? This is intentionally deferred to the lower-level execution design.
+      </div>
+    </div>
+  </section>
+
+
+  <div class="implementation-divider">Implementation roadmap — evolving the live platform</div>
+
+  <section id="migration">
+    <div class="shell">
+      <div class="section-head">
+        <h2>Current → Target migration</h2>
+        <p>
+          The implementation is not a rewrite. Each slice is inserted into the current customer-serving flow,
+          initially preserving today’s behavior before taking on additional responsibility.
+        </p>
+      </div>
+
+      <div class="roadmap">
+        <div class="migration">
+          <div class="stage">
+            <div class="num">Today</div>
+            <b>Existing Onboarding</b>
+            <span>Current onboarding directly invokes the Evergreen schedule workflow.</span>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage">
+            <div class="num">Slice 1</div>
+            <b>Discovery</b>
+            <span>New onboarding and event ingestion establish environment truth while still using the existing schedule workflow.</span>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage">
+            <div class="num">Slice 2</div>
+            <b>State Machine</b>
+            <span>Discovery feeds lifecycle decisioning; repave-needed work still follows the existing execution behavior.</span>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage">
+            <div class="num">Slice 3</div>
+            <b>Scheduling Service</b>
+            <span>Scheduling becomes the control point for automated execution, then adds deferral, waves and capacity policy.</span>
+          </div>
+        </div>
+
+        <div class="principle">
+          Preserve customer behavior first → prove the new architectural seam → progressively move responsibility into it.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="slice1">
+    <div class="shell">
+      <div class="slice">
+        <div class="slice-title">
+          <div>
+            <span class="badge">Slice 1</span>
+            <h2 style="margin-top:12px">Onboarding & Discovery</h2>
+            <p>
+              Introduce a new source of environment truth without initially changing the downstream scheduling behavior customers rely on today.
+            </p>
+          </div>
+        </div>
+
+        <div class="cwr">
+          <div class="phase crawl">
+            <div class="phase-label">Crawl</div>
+            <h3>Introduce evergreen.yml onboarding</h3>
+            <ul>
+              <li>Consume <code>evergreen.yml</code> from the application Git repository</li>
+              <li>Validate onboarding configuration</li>
+              <li>Discover configured environments</li>
+              <li>Collect the information required by current onboarding</li>
+              <li>Call the existing Evergreen schedule workflow the same way onboarding does today</li>
+            </ul>
+            <div class="outcome">
+              <strong>Outcome</strong>
+              A new onboarding mechanism is introduced with no downstream execution behavior change.
+            </div>
+          </div>
+
+          <div class="phase walk">
+            <div class="phase-label">Walk</div>
+            <h3>Make discovery event-driven</h3>
+            <ul>
+              <li>Ingest external deployment events</li>
+              <li>Ingest new base-image events</li>
+              <li>Use those events to refresh environment truth through the discovery flow</li>
+              <li>Continue invoking the existing Evergreen schedule workflow</li>
+              <li>Prove event-driven discovery before changing decision ownership</li>
+            </ul>
+            <div class="outcome">
+              <strong>Outcome</strong>
+              Discovery becomes continuously updated while execution remains backward compatible.
+            </div>
+          </div>
+
+          <div class="phase run">
+            <div class="phase-label">Run</div>
+            <h3>Feed the State Machine</h3>
+            <ul>
+              <li>Discovery stops deciding that work should execute</li>
+              <li>Emit/update canonical environment facts</li>
+              <li>Provide application image, observed base and desired base</li>
+              <li>Provide automation type and environment configuration</li>
+              <li>State Machine becomes the consumer of discovery results</li>
+            </ul>
+            <div class="outcome">
+              <strong>Outcome</strong>
+              Discovery owns truth; lifecycle decisioning moves cleanly into Slice 2.
+            </div>
+          </div>
+        </div>
+
+        <div class="road-flow">
+          <div class="flowline">
+            <div class="node"><b>evergreen.yml</b><small>Git repository onboarding</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="node"><b>Discovery</b><small>Establish environment facts</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="node"><b>Crawl / Walk</b><small>Call existing schedule workflow</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="node"><b>Run</b><small>Feed State Machine instead</small></div>
+          </div>
+        </div>
+
+        <div class="compat">
+          <b>Compatibility principle:</b> Crawl and Walk intentionally preserve the current Evergreen schedule workflow.
+          The architectural handoff changes only after event-driven discovery is proven.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="slice2">
+    <div class="shell">
+      <div class="slice">
+        <div class="slice-title">
+          <div>
+            <span class="badge">Slice 2</span>
+            <h2 style="margin-top:12px">State Machine</h2>
+            <p>
+              Introduce explicit lifecycle decisioning while preserving the current “repave when needed” execution behavior first.
+            </p>
+          </div>
+        </div>
+
+        <div class="cwr">
+          <div class="phase crawl">
+            <div class="phase-label">Crawl</div>
+            <h3>Introduce core lifecycle states</h3>
+            <ul>
+              <li>Add <code>DISCOVERY</code></li>
+              <li>Add <code>UP_TO_DATE</code></li>
+              <li>Add <code>REPAVE_NEEDED</code></li>
+              <li>Add <code>BLOCKED</code></li>
+              <li>Evaluate observed vs desired state</li>
+              <li>When <code>REPAVE_NEEDED</code>, immediately call the Evergreen schedule workflow</li>
+            </ul>
+            <div class="outcome">
+              <strong>Outcome</strong>
+              Decision ownership moves into the State Machine without changing current scheduling behavior.
+            </div>
+          </div>
+
+          <div class="phase walk">
+            <div class="phase-label">Walk</div>
+            <h3>Add user deferral & governance</h3>
+            <ul>
+              <li>Add <code>DEFERRED</code></li>
+              <li>Add <code>EXCEPTION</code></li>
+              <li>Allow users to defer automated remediation</li>
+              <li>Enforce firm-defined deferral limits</li>
+              <li>Move overdue remediation into <code>EXCEPTION</code></li>
+              <li>Keep technical failures distinct in <code>BLOCKED</code></li>
+            </ul>
+            <div class="outcome">
+              <strong>Outcome</strong>
+              The lifecycle now represents user intent and firm remediation policy.
+            </div>
+          </div>
+
+          <div class="phase run">
+            <div class="phase-label">Run</div>
+            <h3>Close the loop with Temporal</h3>
+            <ul>
+              <li>Consume Temporal workflow callbacks</li>
+              <li>Add non-prod execution states</li>
+              <li>Add production execution states</li>
+              <li>Introduce evaluatable states</li>
+              <li>Reevaluate new base / deployment information in safe states</li>
+              <li>Make lifecycle state authoritative end-to-end</li>
+            </ul>
+            <div class="outcome">
+              <strong>Outcome</strong>
+              State reflects both external environment truth and active workflow progress.
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top:22px">
+          <div class="card">
+            <h3>Crawl state model</h3>
+            <div class="state-row">
+              <div class="state">DISCOVERY</div><div class="state-arrow">→</div>
+              <div class="state">UP_TO_DATE</div><div class="state-arrow">/</div>
+              <div class="state">REPAVE_NEEDED</div><div class="state-arrow">/</div>
+              <div class="state">BLOCKED</div>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Walk governance extension</h3>
+            <div class="state-row">
+              <div class="state">REPAVE_NEEDED</div><div class="state-arrow">→</div>
+              <div class="state">DEFERRED</div><div class="state-arrow">→</div>
+              <div class="state">EXCEPTION</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="callout" style="margin-top:20px">
+          <strong>Run-level evaluatable states:</strong>
+          <code>UP_TO_DATE</code>, <code>REPAVE_NEEDED</code>, <code>DEFERRED</code>,
+          <code>EXCEPTION</code> and <code>PENDING_REPAVE_WINDOW</code>.
+        </div>
+
+        <div class="compat">
+          <b>Compatibility principle:</b> the first State Machine release changes who decides a repave is needed,
+          but still sends that work immediately into the existing Evergreen schedule path.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="slice3">
+    <div class="shell">
+      <div class="slice">
+        <div class="slice-title">
+          <div>
+            <span class="badge">Slice 3</span>
+            <h2 style="margin-top:12px">Scheduling Service</h2>
+            <p>
+              Introduce the scheduling layer first as a pass-through seam, then progressively make it responsible for execution eligibility and firm-scale rollout controls.
+            </p>
+          </div>
+        </div>
+
+        <div class="cwr">
+          <div class="phase crawl">
+            <div class="phase-label">Crawl</div>
+            <h3>Pass through fully automated work</h3>
+            <ul>
+              <li>Receive the relevant execution-ready state</li>
+              <li>Support fully automated environment types first</li>
+              <li>Forward eligible work immediately to Temporal</li>
+              <li>Preserve current customer execution timing</li>
+              <li>Create the architectural seam for future policy</li>
+            </ul>
+            <div class="outcome">
+              <strong>Outcome</strong>
+              The scheduling service sits safely in-path without materially changing customer behavior.
+            </div>
+          </div>
+
+          <div class="phase walk">
+            <div class="phase-label">Walk</div>
+            <h3>Respect user deferrals</h3>
+            <ul>
+              <li>Take State Machine deferral outcomes into account</li>
+              <li>Do not schedule <code>DEFERRED</code> work</li>
+              <li>Do not schedule <code>BLOCKED</code> work</li>
+              <li>Keep deferral policy calculation in the State Machine</li>
+              <li>Forward eligible fully automated work to Temporal</li>
+            </ul>
+            <div class="outcome">
+              <strong>Outcome</strong>
+              User control is honored without duplicating governance logic in the scheduler.
+            </div>
+          </div>
+
+          <div class="phase run">
+            <div class="phase-label">Run</div>
+            <h3>Add waves, capacity & manual override</h3>
+            <ul>
+              <li>Introduce timed waves by environment</li>
+              <li>Apply configurable concurrency limits</li>
+              <li>Allow limits to change dynamically with platform load</li>
+              <li>Add start-rate and automated pause controls</li>
+              <li>Allow manual execution to bypass wave timing</li>
+              <li>Reserve capacity for manual user-triggered work</li>
+            </ul>
+            <div class="outcome">
+              <strong>Outcome</strong>
+              Scheduling becomes the firm-scale rollout and load-protection control plane.
+            </div>
+          </div>
+        </div>
+
+        <div class="road-flow">
+          <div class="flowline">
+            <div class="node"><b>REPAVE_NEEDED</b><small>State Machine says work is required</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="node"><b>Automated / Manual</b><small>Determine execution path</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="node"><b>Deferral / Wave</b><small>Eligibility policy</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="node"><b>Capacity</b><small>Concurrency + rate + reserve</small></div>
+            <div class="flow-arrow">→</div>
+            <div class="node"><b>Temporal</b><small>Start execution</small></div>
+          </div>
+        </div>
+
+        <div class="note" style="margin-top:20px">
+          <b>Open question retained:</b> how production workflows in <code>PENDING_REPAVE_WINDOW</code>
+          should count against scheduler concurrency is intentionally deferred to lower-level execution design.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="summary">
+    <div class="shell">
+      <div class="section-head">
+        <h2>Crawl / Walk / Run summary</h2>
+        <p>The roadmap shows both the target capability and how each slice fits safely into the current platform while it is being introduced.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>Crawl</th>
+              <th>Walk</th>
+              <th>Run</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Onboarding & Discovery</strong></td>
+              <td>Consume <code>evergreen.yml</code>; call existing schedule workflow exactly as onboarding does today</td>
+              <td>Ingest deployment + new base-image events through discovery; continue current scheduling path</td>
+              <td>Discovery becomes the fact provider to the State Machine</td>
+            </tr>
+            <tr>
+              <td><strong>State Machine</strong></td>
+              <td><code>DISCOVERY</code>, <code>UP_TO_DATE</code>, <code>REPAVE_NEEDED</code>, <code>BLOCKED</code>; immediately schedule needed work</td>
+              <td>Add <code>DEFERRED</code> + <code>EXCEPTION</code>; enable manual deferral and policy enforcement</td>
+              <td>Temporal callbacks, active execution states and evaluatable-state behavior</td>
+            </tr>
+            <tr>
+              <td><strong>Scheduling Service</strong></td>
+              <td>Fully automated work passes directly through to Temporal</td>
+              <td>Respect State Machine deferrals before forwarding</td>
+              <td>Timed waves, dynamic capacity controls, manual override and reserved manual capacity</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout" style="margin-top:22px">
+        <strong>Implementation principle:</strong>
+        each new architectural layer is first inserted in compatibility mode. Once it is proven,
+        the next increment moves more decision-making into that layer without requiring a disruptive rewrite of the existing Evergreen platform.
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="shell">
+      <div class="summary">
+        <h2 style="margin-bottom:12px">Combined takeaway</h2>
+        <p class="lede" style="font-size:20px">
+          Evergreen continuously identifies which environments require remediation, but deliberately separates that determination from execution.
+          Timed waves govern automated rollout, users can temporarily defer automated work within firm policy, exceptions make overdue remediation visible, manual users retain a responsive execution path, and dynamically configurable scheduler limits protect shared infrastructure from firm-wide load spikes.
+        </p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="shell">Evergreen Rebase / Repave · Target State & Implementation Roadmap</div>
+</footer>
+</body>
+</html>
