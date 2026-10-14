@@ -2,13 +2,14 @@
 
 **Status:** Design handoff for Slice 1 implementation  
 **Prepared:** 2026-10-14  
-**Primary goal:** Create the operational-facts foundation of a new state-machine service while preserving existing Evergreen execution.
+**Primary goal:** Create the first working environment-currency state machine (`DISCOVERY` → `UP_TO_DATE` / `REPAVE_NEEDED`) from live discovery and events, while preserving existing Evergreen execution.
+**Revision:** 2026-10-14 — Slice 1 expanded to include asynchronous currency evaluation and monitoring gated by `DISCOVERY`.
 
 > **Reading rule:** This document distinguishes **LOCKED decisions**, **PROPOSED implementation tactics**, and **OPEN integration details**. Do not treat proposed examples as verified interfaces.
 
 ## 1. Purpose and boundary
 
-Evergreen already has working rebase/repave execution workflows. This effort introduces a new service that maintains durable knowledge of onboarded components, their independently managed environments, currently running application images, and firm-published base images. The future lifecycle state evaluator will use those facts to determine maintenance needs.
+Evergreen already has working rebase/repave execution workflows. This effort introduces a new service that maintains durable knowledge of onboarded components, their independently managed environments, currently running application images, and firm-published base images. A small lifecycle evaluator in Slice 1 uses those facts to determine whether routine maintenance is needed; full execution and governance states remain future work.
 
 **The service owns:**
 
@@ -16,14 +17,14 @@ Evergreen already has working rebase/repave execution workflows. This effort int
 - Typed, **in-process** internal Evergreen event dispatch/handlers.
 - Current-state persistence for `components`, `environments`, and `baseImages`.
 - Asynchronous initial discovery of images running in newly registered environments.
-- Future lifecycle state evaluation, logically distinct from ingestion (not built in Slice 1).
+- A **Slice 1 asynchronous lifecycle evaluator**, logically separate from ingestion, comparing observed base image with the latest available/comparable catalog image within the same supported major line.
 
 **Outside this service:**
 
 - Repository GitHub Actions onboarding workflow.
 - Existing main Evergreen API endpoint `/onboarding`, its request validation, and its forwarding to the current workflow. It emits an onboarding event to this service.
 - Existing Temporal rebase/repave/validation execution workflows.
-- Future maintenance target selection, governance, policy, deferrals, scheduler, wave admission and capacity controls.
+- Future pinned maintenance-cycle target selection, governance, policy, deferrals, scheduler, wave admission and capacity controls.
 
 The main API is **not** a second direct writer of this service's operational-state collections.
 
@@ -45,12 +46,18 @@ API onboarding Kafka event ---------+      |                             |
                                             | Background discovery worker |
                                             |   -> live environment read  |
                                             |   -> observed-facts update  |
+                                            | Eval worker (asynchronous)  |
+                                            |   -> UP_TO_DATE or          |
+                                            |      REPAVE_NEEDED          |
                                             +-----------------------------+
 
 MongoDB owned by service: components | environments | baseImages
 
-FUTURE (not Slice 1): observed-fact changes -> asynchronous lifecycle evaluation
-                       -> Kafka state-change notifications + authoritative query API
+SLICE 1: discovery -> persist facts -> request evaluation -> UP_TO_DATE / REPAVE_NEEDED
+         -> completed-deployment monitoring (only for non-DISCOVERY environments)
+         -> persist facts -> request reevaluation
+         new relevant base-image catalog entries -> bounded reevaluation requests
+FUTURE: selected/pinned cycle target; Kafka state-change notifications + query API
 ```
 
 Source adapters and domain handlers have different responsibilities. A new external publisher/schema requires an adapter or mapper change, **not** a rewrite of environment-update logic. The internal event boundary is logical/in-process in Slice 1, not a new Kafka topic.
@@ -69,10 +76,10 @@ Source adapters and domain handlers have different responsibilities. A new exter
 | AD-08 | Internal event routing | Typed Evergreen events handled **in-process** | No extra internal Kafka topics for Slice 1. |
 | AD-09 | Onboarding | Main API publishes onboarding event; state service initializes records | Environment begins in `DISCOVERY`; preserve current execution path in main API. |
 | AD-10 | First observations | Initial environment-image reads run asynchronously after onboarding | Persist pending discovery before acknowledging onboarding; worker can recover after pod loss. |
-| AD-11 | Subsequent observations | Completed-deployment events carry data needed to update environment observation directly | No per-deployment live read is required; the deployment completion timestamp is used to reject stale observations. |
+| AD-11 | Subsequent observations | Completed-deployment events carry data needed to update environment observation directly **after initial evaluation exits `DISCOVERY`** | While `DISCOVERY`, ignore deployment updates without buffering; for monitored environments, use completion time to reject stale updates, no live read for each event. |
 | AD-12 | Kafka | At-least-once; acknowledge/commit after durable handling | Idempotency, recoverability, malformed-message handling are required. |
-| AD-13 | State evaluation | Evaluation is logically separate from ingestion, inside same future service | Slice 1 stores facts; it does not yet calculate state transitions. |
-| AD-14 | Image catalog vs maintenance target | New available images update `baseImages`; future currency compares to **selected/pinned maintenance target**, not automatically latest discovered image | No automatic fleet reevaluation or target selection on new image arrival in Slice 1. |
+| AD-13 | State evaluation | **Included in Slice 1**; logically separate/asynchronous within same service | Evaluate current persisted facts and target; write `UP_TO_DATE` or `REPAVE_NEEDED` only when comparison is valid. Use durable evaluation intent and protect against stale results. |
+| AD-14 | Image catalog vs maintenance target | **Slice 1 interim:** compare against latest available/comparable catalog image in the **same supported major line** (highest numeric version, then build). **Future:** pinned maintenance-cycle target replaces resolver. | New relevant image release can cause bounded reevaluation. Catalog publication must not schedule repaves or trigger major-version upgrade. |
 | AD-15 | Future external interface | Kafka state-change notifications **and** query API preferred | Direction only; not a Slice 1 deliverable. |
 
 ## 4. Environment modeling nuances
@@ -97,29 +104,33 @@ The component identifier is supplied by onboarding context/main API; it is **not
 1. Receive onboarding event from main API, with authoritative component ID and declared managed environments.
 2. Persist/update component and environment configuration idempotently. New environments get `lifecycle.state = DISCOVERY` and a **durable pending-discovery marker**.
 3. Commit onboarding Kafka offset only once the component/environment initialization and discovery intent are durable.
-4. Worker(s) safely claim pending environment(s), call a live source for the running application image, and write observed image facts without overwriting a newer deployment event.
-5. Discovery errors stay visible/retryable; they do not automatically imply lifecycle `BLOCKED`.
+4. Worker(s) safely claim pending environment(s), call a live source for the running application image/base-image facts, and persist the observation.
+5. Persist a **durable pending evaluation**; the evaluator reads the current observation and latest comparable image from `baseImages`, then transitions from `DISCOVERY` to `UP_TO_DATE` or `REPAVE_NEEDED` when sufficient data is available. Only then does monitoring apply deployment events.
+6. Discovery/evaluation errors or missing provenance/catalog information leave the environment in `DISCOVERY`, with reason and retry/re-evaluation visibility; do not automatically imply `BLOCKED`. No extra initialization/monitoring state machine is needed.
 
 ### Subsequent deployment events
 
 1. Source adapter filters and normalizes a **completed deployment**, not merely an attempt/start.
 2. Correlate to an onboarded managed environment by component and environment coordinates.
-3. Directly apply the event's image facts, using an atomic conditional update based on **deployment-completion timestamp**, when reliably supplied.
-4. Older and duplicate events do not regress the record; equal-timestamp conflicts require a defined handling path.
-5. No automatic environment creation from unrecognized firm-wide events.
+3. If `lifecycle.state == DISCOVERY`, **skip monitoring update**; no buffering or replay of these events in Slice 1. The initial live read establishes initial truth.
+4. Otherwise, directly apply the event's image facts, using an atomic conditional update based on **deployment-completion timestamp**, when reliably supplied, and durably request independent state reevaluation.
+5. Older and duplicate events do not regress the record; equal-timestamp conflicts require a defined handling path.
+6. No automatic environment creation from unrecognized firm-wide events.
 
 ### Base-image discovery
 
-A replaceable source adapter ingests one real available-image source (its mechanics may be Kafka or a poller, depending on actual source support), normalizes it to an internal image event, and upserts the base-image catalog. Source availability does **not** mean an image is a selected maintenance target. Provenance of a running application image is a separate lookup/problem; **do not infer it from tags or layers without an authoritative source**.
+A replaceable source adapter ingests one real available-image source (its mechanics may be Kafka or a poller, depending on actual source support), normalizes it to an internal image event, and upserts the base-image catalog. In Slice 1, published/available catalog images are candidates for the **latest available comparable image** within the environment's existing major line (exclude an image only when upstream explicitly marks it unusable); relevant changes request **bounded, asynchronous reevaluation**. Source availability is not a pinned future-cycle target. Provenance of a running application image is a separate lookup/problem; **do not infer it from tags or layers without an authoritative source**.
 
 ## 6. Runtime and correctness principles
 
 - **Kafka:** consumer groups for each source; processing partitions are distributed across replicas. Partition order alone cannot establish cross-partition environment chronology.
 - **MongoDB:** compound unique environment index, atomic environment-level conditional updates, idempotent upserts; no read–modify–replace of entire documents for independent event updates.
 - **Async discovery:** a durable claim/lease with expiry and retry state in `environments` is the initial proposed mechanism. Do not acknowledge onboarding while pending work exists only in volatile process memory.
-- **Observation ordering:** the deployment-completion timestamp is the expected event ordering signal, assuming semantics/clock reliability are verified. Live reads may not carry comparable timestamps; until verified, an initial read must not overwrite an event-backed observation.
+- **Observation ordering:** completed-deployment timestamps order **monitored** event updates. While `DISCOVERY`, deployment events are skipped; live discovery is the initial source of observed facts. Do not add a speculative event buffer. If a background read retries, prevent stale worker attempts from clobbering newer confirmed discovery results.
+- **Evaluator durability:** observation/catalog change requests evaluation via durable per-environment intent. Evaluator operates on persisted latest facts; a guarded update/version check prevents old evaluation results overwriting new ones. For monitored environments, incomplete comparison marks assessment unresolved/stale (not safe for later admission), rather than falsely retaining an authoritative `UP_TO_DATE` claim.
+- **Compatibility:** compare numeric version then numeric build only within the current major line; major-version migrations are out of scope. Unparseable tags, missing eligibility/provenance or ambiguous equal ranks are **unresolved**, never guessed.
 - **Failure handling:** distinguish ignored-unmanaged event, duplicate/stale event, malformed/unprocessable event, transient integration failure, and incomplete discovery. Kafka offset management must not turn a transient failure into message loss.
-- **Observability:** source consumer lag; per-source accept/drop/error counts; discovery pending/in-progress/failures; conditional-update stale discards; last successful base-source sync.
+- **Observability:** source consumer lag; per-source accept/drop/error counts; discovery pending/in-progress/failures; skipped `DISCOVERY` deployment events; evaluation requested/running/unresolved/completed; conditional-update stale discards; last successful base-source sync.
 - **Security:** use existing organizational Kafka, MongoDB, and live-source access patterns; never store credentials in events, test fixtures or repository files.
 
 Exact retry counts, DLQ setup, lease TTL, indexes beyond identity, and monitoring technology are **implementation proposals to confirm with the repository and platform standards**, not decisions made in the discussion.
@@ -128,7 +139,7 @@ Exact retry counts, DLQ setup, lease TTL, indexes beyond identity, and monitorin
 
 Evergreen's future operating model is based on a **four-week maintenance cycle**: **Week 1** estate-wide CI rebases against a selected/pinned base image; **Weeks 2 and 3** capacity-bounded CD repaves through planned LOB cohorts and RTO waves (higher RTO/lower criticality first); **Week 4** buffer and recovery. Each independently managed environment may run a different application image. Rebase creates an updated artifact from that environment's running application code; repave deploys it. For production, the rebased production artifact is first tested in all designated validation environments; the **same artifact** is then used for production, subject to change controls and maintenance windows.
 
-Future lifecycle states include `DISCOVERY`, `UP_TO_DATE`, `REPAVE_NEEDED`, `BLOCKED`, `DEFERRED`, and execution states. Policy/governance, maintenance debt, target selection, Temporal scheduling and capacity admission are **future**. Do not create them in Slice 1 merely because they appear in the platform vision.
+Slice 1 implements exactly three lifecycle states: `DISCOVERY`, `UP_TO_DATE`, `REPAVE_NEEDED`. Other future states include `BLOCKED`, `DEFERRED`, and execution states. Policy/governance, maintenance debt, **pinned cycle** target selection, Temporal scheduling and capacity admission are **future**. Do not create them in Slice 1 merely because they appear in the platform vision.
 
 Four **two-week engineering delivery increments** (Oct 12–Dec 6, 2026) are a different timeline from the recurring four-week operational maintenance cycle. This handoff addresses only the first delivery increment.
 
@@ -139,8 +150,10 @@ Four **two-week engineering delivery increments** (Oct 12–Dec 6, 2026) are a d
 3. Verified external Kafka event payloads, topic names, consumer-group configuration and filtering semantics; exact mapping to Harness stage/env.
 4. Live environment reader: target system, credentials/access pattern, actual image identity and timestamp/revision supplied.
 5. How original application-image base provenance is determined when not supplied by the event or live reader.
-6. Base-image source: API/topic/repository/scraper choice, immutable identity and source-supported availability/approval metadata.
+6. Base-image source: API/topic/repository/scraper choice, immutable identity, structured version/build/major-line metadata and source-supported eligibility/approval semantics.
 7. Operational policy for malformed events, identity collisions, same-timestamp conflicting deployments, discovery lease expiry and retries.
 8. What a changed/deleted environment declaration means (retirement/removal vs preserved historical record).
+9. How to compare real tags/build numbers when upstream lacks structured numeric version/build metadata; what explicit upstream flags, if any, exclude a published image from use.
+10. How to durably request and batch reevaluations after catalog changes while staying within the three domain collections.
 
 See `contracts.md` for intentionally provisional shapes and `slice-1.md` for implementation stages and acceptance tests.
